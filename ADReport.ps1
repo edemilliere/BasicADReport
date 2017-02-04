@@ -86,8 +86,21 @@ $GPOStats = @(
 #endregion
 
 #region Site & Subnet
-$Site  = Get-ADReplicationSite @AdParam -Filter * | Select-Object -Property Name,ManagedBy,InterSiteTopologyGenerator
+$Site  = Get-ADReplicationSite @AdParam -Filter * -Properties GpLink | Select-Object -Property Name,ManagedBy,InterSiteTopologyGenerator,GpLink
 $Subnet = Get-ADReplicationSubnet @AdParam -Filter * | Select-Object -Property Name, Location, Site
+#endregion
+
+#region Risks
+$PwdNotRequired = Get-ADUser -LDAPFilter '(useraccountcontrol:1.2.840.113556.1.4.803:=32)' @AdParam | Select-Object -Property DistinguishedName,Enabled,SamAccountName
+$DontRequirePreAuth = Get-ADUser -LDAPFilter '(useraccountcontrol:1.2.840.113556.1.4.803:=4194304)' @AdParam | Select-Object -Property DistinguishedName,Enabled
+$DynamicObject = Get-ADObject -LDAPFilter '(objectclass=dynamicobject)' @AdParam -Properties entryTTL | Select-Object -Property DistinguishedName,Enabled,ObjectClass,entryTTL
+
+$DsrmAdminLogonBehavior = Invoke-Command -ComputerName $DomainControllers.Name -ScriptBlock {Get-ItemProperty -Path hklm:\System\CurrentControlSet\Control\Lsa -Name DsrmAdminLogonBehavior} | Select-Object -Property PSComputerName,DsrmAdminLogonBehavior
+$UnauditedAttribute = Get-ADObject -LDAPFilter '(searchFlags:1.2.840.113556.1.4.803:=256)' @AdParam | Select-Object -Property Name
+
+$TrustsWithoutSIDHistoryFiltering = Get-ADTrust -Filter {SIDFilteringQuarantined -eq $false} | Select-Object -Property Name,Direction,IntraForest,ForestTransitive
+$AdminSdHolderMetadata =  Get-ADObject -Identity "CN=AdminSdHolder,CN=SYSTEM,$(Get-ADRootDSE | Select-Object -ExpandProperty defaultNamingContext)" | Get-ADReplicationAttributeMetadata -Server ($DomainControllers | Select-Object -First 1 -ExpandProperty Name) | Where-Object -FilterScript {$_.Version -ge 2} | Select-Object -Property AttributeName,AttributeValue,LastOriginatingChangeTime,Version 
+$DomainMetadata =  Get-ADObject -Identity "$(Get-ADRootDSE | Select-Object -ExpandProperty defaultNamingContext)" | Get-ADReplicationAttributeMetadata -Server ($DomainControllers | Select-Object -First 1 -ExpandProperty Name) | Where-Object -FilterScript {$_.Version -ge 2} | Select-Object -Property AttributeName,AttributeValue,LastOriginatingChangeTime,Version
 #endregion
 
 #region HTML
@@ -136,6 +149,25 @@ $($Site | ConvertTo-Html -Fragment)
 <h3>Subnets: $(@($Subnet).Count)</h3>
 $($Subnet | ConvertTo-Html -Fragment)
 
+<h2>Risks</h2>
+<h3>Password Not Required</h3>
+$($PwdNotRequired | ConvertTo-Html -Fragment)
+<h3>Don't Require PreAuth</h3>
+$($DontRequirePreAuth | ConvertTo-Html -Fragment)
+<h3>DynamicObject</h3>
+$($DynamicObject | ConvertTo-Html -Fragment)
+
+<h3>DsrmAdminLogonBehavior</h3>
+$($DsrmAdminLogonBehavior | ConvertTo-Html -Fragment)
+<h3>UnauditedAttribute</h3>
+$($UnauditedAttribute | ConvertTo-Html -Fragment)
+
+<h3>TrustsWithoutSIDHistoryFiltering</h3>
+$($TrustsWithoutSIDHistoryFiltering | ConvertTo-Html -Fragment)
+<h3>AdminSdHolderMetadata</h3>
+$($AdminSdHolderMetadata | ConvertTo-Html -Fragment)
+<h3>DomainMetadata</h3>
+$($DomainMetadata | ConvertTo-Html -Fragment)
 </body>
 "@ | Out-File -Encoding utf8 ADReport.html
 #endregion
